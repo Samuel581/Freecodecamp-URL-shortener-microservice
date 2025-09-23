@@ -16,7 +16,7 @@ var urls = database.collection("urls");
 // Middlewares
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-app.use(cors());
+app.use(cors({ origin: "*" }));
 
 function hasProtocolHTTP(rawUrl) {
   try {
@@ -37,7 +37,7 @@ app.get("/api/hello", (req, res) => {
   res.json({ greeting: "hello API" });
 });
 
-app.post("/api/shorturl", (req, res) => {
+app.post("/api/shorturl", async (req, res) => {
   console.log(req.body);
   const url = req.body.url;
   // Validate protocol first
@@ -45,20 +45,33 @@ app.post("/api/shorturl", (req, res) => {
     return res.json({ error: "invalid url" });
   }
 
-  dns.lookup(new URL(url).hostname, async (err, address) => {
-    if (err || !address) {
-      return res.json({ error: "invalid url" });
-    }
+  try {
+    // Convert dns.lookup to Promise to avoid callback hell
+    const hostname = new URL(url).hostname;
+
+    await new Promise((resolve, reject) => {
+      dns.lookup(hostname, (err, address) => {
+        if (err || !address) {
+          reject(new Error("Invalid hostname"));
+        } else {
+          resolve(address);
+        }
+      });
+    });
 
     const urlCount = await urls.countDocuments();
+    const shortUrl = urlCount + 1; // Start from 1, not 0
+
     const urlDoc = {
       url,
-      short_url: urlCount,
+      short_url: shortUrl,
     };
-    const results = await urls.insertOne(urlDoc);
-    console.log(results);
-    res.json({ original_url: url, short_url: urlCount });
-  });
+
+    await urls.insertOne(urlDoc);
+    res.json({ original_url: url, short_url: shortUrl });
+  } catch (error) {
+    return res.json({ error: "invalid url" });
+  }
 });
 
 app.get("/api/shorturl/:shorturl", async (req, res) => {
